@@ -1,0 +1,62 @@
+name: Sync Latest TabMixPlus Release
+
+on:
+  schedule:
+    # 每天一次同步
+    - cron: "0 0 * * *"  # 可以根据需要调整时间
+  workflow_dispatch: # 支持手动触发工作流
+
+jobs:
+  sync-releases:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Git
+      run: |
+        git config user.name "klcb2010"
+        git config user.email "klcb2010@gmail.com"
+
+    - name: Set up GitHub Token
+      run: echo "GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_ENV
+
+    - name: Fetch latest release from TabMixPlus
+      run: |
+        # 获取最新发布标签的下载链接
+        latest_tag=$(curl -s https://api.github.com/repos/onemen/TabMixPlus/releases/latest | jq -r '.tag_name')
+        echo "Fetching latest release for tag: $latest_tag"
+        
+        # 获取最新标签的所有资产下载链接
+        assets=$(curl -s https://api.github.com/repos/onemen/TabMixPlus/releases/tags/$latest_tag | jq -r '.assets[].browser_download_url')
+
+        # 创建发布（release）
+        release_response=$(curl -s -X POST https://api.github.com/repos/klcb2010/TabMixPlus/releases \
+          -H "Authorization: token $GITHUB_TOKEN" \
+          -d "{
+            \"tag_name\": \"$latest_tag\",
+            \"name\": \"Release $latest_tag\",
+            \"body\": \"This is the release for version $latest_tag\",
+            \"draft\": false,
+            \"prerelease\": false
+          }"
+        )
+
+        # 获取发布的 ID
+        release_id=$(echo $release_response | jq -r '.id')
+
+        # 下载并上传每个资产到发布中
+        for asset in $assets; do
+          file_name=$(basename "$asset")
+          echo "Downloading $file_name and uploading to release"
+          
+          # 下载文件
+          curl -L -o "$file_name" "$asset"
+          
+          # 上传文件到发布
+          curl -X POST -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Content-Type: application/octet-stream" \
+            --data-binary @"$file_name" \
+            "https://uploads.github.com/repos/klcb2010/TabMixPlus/releases/$release_id/assets?name=$file_name"
+        done
